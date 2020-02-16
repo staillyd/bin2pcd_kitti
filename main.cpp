@@ -45,15 +45,16 @@ private:
 
 CommandLineArgs::CommandLineArgs(int argc, char **argv)
 {
-    _bin_path = "/home/kitti_velodyne_bin_to_pcd/bin/";
-    _pcd_path = "/home/kitti_velodyne_bin_to_pcd/pcd/";
+    std::string _bin_path_default= "./bin/";
+    std::string _pcd_path_default = "./pcd/";
+    std::string _mode_default="bin2pcd";
 
     _desc = new boost::program_options::options_description("Program Usage", 1024, 512);
     _desc->add_options()
                     ("help",     "produce help message")
-                    ("b",   boost::program_options::value<std::string>(&_bin_path)->required(), "bin file folder")
-                    ("p",   boost::program_options::value<std::string>(&_pcd_path)->required(), "pcd file folder")
-                    ("m",   boost::program_options::value<std::string>(&_mode)->required(),     "mode - bin2pcd, pcd2bin")                    
+                    ("b",   boost::program_options::value<std::string>(&_bin_path)->default_value(_bin_path_default), "bin file folder")
+                    ("p",   boost::program_options::value<std::string>(&_pcd_path)->default_value(_pcd_path_default), "pcd file folder")
+                    ("m",   boost::program_options::value<std::string>(&_mode)->default_value(_mode_default),     "mode - bin2pcd, pcd2bin")                    
                     ;
     process_command_line(argc, argv);
 }
@@ -77,7 +78,7 @@ bool CommandLineArgs::process_command_line(
         // There must be an easy way to handle the relationship between the
         // option "help" and "host"-"port"-"config"
         // Yes, the magic is putting the po::notify after "help" option check
-        boost::program_options::notify(vm);
+        boost::program_options::notify(vm);// 将vm保存的参数赋值给_desc所描述的变量中，即:更新对应变量
     }
     catch (std::exception &e)
     {
@@ -92,23 +93,23 @@ bool CommandLineArgs::process_command_line(
     }
     return true;
 }
-
-void read_filelists(const std::string& dir_path,std::vector<std::string>& out_filelsits,std::string type)
+// 读取指定文件夹dir_path下的文件，如果后缀名和type相同，则将该文件存入out_filelists中
+void read_filelists(const std::string& dir_path,std::vector<std::string>& out_filelists,std::string type)
 {
     struct dirent *ptr;
     DIR *dir;
     dir = opendir(dir_path.c_str());
-    out_filelsits.clear();
+    out_filelists.clear();
     while ((ptr = readdir(dir)) != NULL){
         std::string tmp_file = ptr->d_name;
         if (tmp_file[0] == '.')continue;
         if (type.size() <= 0){
-            out_filelsits.push_back(ptr->d_name);
+            out_filelists.push_back(ptr->d_name);
         }else{
             if (tmp_file.size() < type.size())continue;
-            std::string tmp_cut_type = tmp_file.substr(tmp_file.size() - type.size(),type.size());
-            if (tmp_cut_type == type){
-                out_filelsits.push_back(ptr->d_name);
+            std::string tmp_cut_type = tmp_file.substr(tmp_file.size() - type.size(),type.size());//后缀名
+            if (tmp_cut_type == type){//如果文件后缀名和指定后缀名一致
+                out_filelists.push_back(ptr->d_name);//将当前文件存入out_filelsits
             }
         }
     }
@@ -129,7 +130,7 @@ void sort_filelists(std::vector<std::string>& filists,std::string type)
 void readKittiPclBinData(std::string &in_file, std::string& out_file)
 {
     // load point cloud
-    std::fstream input(in_file.c_str(), std::ios::in | std::ios::binary);
+    std::fstream input(in_file.c_str(), std::ios::in | std::ios::binary);//二进制流
     if(!input.good()){
         std::cerr << "Could not read file: " << in_file << std::endl;
         exit(EXIT_FAILURE);
@@ -139,7 +140,7 @@ void readKittiPclBinData(std::string &in_file, std::string& out_file)
     pcl::PointCloud<pcl::PointXYZI>::Ptr points (new pcl::PointCloud<pcl::PointXYZI>);
 
     int i;
-    for (i=0; input.good() && !input.eof(); i++) {
+    for (i=0; input.good() && !input.eof(); i++) {//转化
         pcl::PointXYZI point;
         input.read((char *) &point.x, 3*sizeof(float));
         input.read((char *) &point.intensity, sizeof(float));
@@ -235,7 +236,7 @@ void updateRear(std::string &pathStr)
 
 int main(int argc, char **argv)
 {
-    
+    //转换参数
     CommandLineArgs cmd_args(argc, argv);
 
     // Create _outputFile folder if not exist
@@ -251,21 +252,21 @@ int main(int argc, char **argv)
         mkdir(folderPath.c_str(), 0755);
     }
 
-    
 
     if(cmd_args._mode == "bin2pcd")
     {
-        read_filelists( cmd_args._bin_path, file_lists, "bin" );
-        sort_filelists( file_lists, "bin" );
+        read_filelists( cmd_args._bin_path, file_lists, "bin" );//将_bin_path文件夹下后缀为bin的文件名存入file_lists
+        sort_filelists( file_lists, "bin" );//对file_lists保存的文件名进行排序
 
+        //多线程提速
         #pragma omp parallel num_threads(8)
         #pragma omp parallel for
         for (int i = 0; i < file_lists.size(); ++i)
         {
             std::string bin_file = cmd_args._bin_path + file_lists[i];
-            std::string tmp_str = file_lists[i].substr(0, file_lists[i].length() - 4) + ".pcd";
+            std::string tmp_str = file_lists[i].substr(0, file_lists[i].length() - 4) + ".pcd";//bin文件对应要转化成的pcd文件
             std::string pcd_file = cmd_args._pcd_path + tmp_str;
-            readKittiPclBinData( bin_file, pcd_file );
+            readKittiPclBinData( bin_file, pcd_file );//读取bin文件->转化成pcd相应的数据结构->保存为pcd文件
         }
     } 
     else if(cmd_args._mode == "pcd2bin")
@@ -291,9 +292,6 @@ int main(int argc, char **argv)
     {
         std::cout << "No mode provided" << std::endl;
     }
-    
-
-    
 
     return 0;
 }
